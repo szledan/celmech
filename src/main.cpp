@@ -10,6 +10,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <unistd.h>
 
 namespace cm {
 
@@ -37,6 +38,13 @@ struct Object {
     double m;
 };
 
+struct System {
+    // double U = 1/2 * SUM(i; SUM(j, i!=j; k^2 * m_i * m_j / r_ij));
+    // Vec3 r = SUM(i; m_i * r_i) / SUM(i; r_i);
+    // Vec3 m = SUM(i; m_i);
+    // m * r = a * t + b; Vec3 a, b; double t;
+};
+
 std::ostream& operator<<(std::ostream& os, const Object& obj)
 {
     os << obj.m << ",";
@@ -45,40 +53,66 @@ std::ostream& operator<<(std::ostream& os, const Object& obj)
     return os;
 }
 
-
-void visualize(const std::vector<cm::Object>& objects)
+void moveCursor(int r, int c)
 {
-    const int SIZE_X = 40;
-    const int SIZE_Y = 20;
-    static bool isFirst = true;
-
-    if (!isFirst) {
-        std::cout << "\033[" + std::to_string(SIZE_Y) + "F";
+    static int rw = 0;
+    static int cl = 0;
+    if (r - rw) {
+        std::cout << "\033[" << std::abs(r - rw) << (r - rw > 0 ? "B" : "A");
+        rw = r;
     }
+    if (c - cl) {
+        std::cout << "\033[" << std::abs(c - cl) << (c - cl > 0 ? "C" : "D");
+        cl = c;
+    }
+}
 
-    std::vector<std::string> map(SIZE_Y, std::string(SIZE_X, '.'));
+void putChar(int r, int c, char ch)
+{
+    moveCursor(r, c);
+    std::cout << ch << "\033[D";
+}
 
+void putStr(int r, int c, std::string str)
+{
+    moveCursor(r, c);
+    std::cout << str;
+    for (int i = 0; i < str.size(); ++i) {
+        std::cout << "\033[D";
+    }
+}
+
+const int SIZE_X = 40;
+const int SIZE_Y = 30;
+
+int create()
+{
+    std::cout << std::string(SIZE_Y, '\n') << std::endl;
+    std::cout << "\033[" + std::to_string(SIZE_Y) + "F";
+    return 0;
+}
+
+void visualize(const std::vector<cm::Object>& objects, char ch, int it)
+{
     for (int i = 0; i < objects.size(); ++i) {
         const cm::Object& o = objects[i];
         const int x = int(o.r.x);
         const int y = int(o.r.y);
         if (x > (-SIZE_X / 2) && x < (SIZE_X / 2) && y > (-SIZE_Y / 2) && y < (SIZE_Y / 2)) {
-            map[y + SIZE_Y / 2][x + SIZE_X / 2] = 'X';
+            putChar(y + SIZE_Y / 2, x + SIZE_X / 2, ch);
         }
     }
-
-    for (int i = 0; i < map.size(); ++i) {
-        std::cout << map[i] << std::endl;
-    }
-
-    isFirst = false;
+    putStr(0, SIZE_X + 1, "it: " + std::to_string(it));
 }
 
 } // namespace cm
 
 int main(int argc, char* argv[])
 {
-    const double k = 1;
+    const double G = 1; // Standard constant: G = 6.67430(15) * 10^−11 (m^3 * kg^−1 * s^−2) = 6.6743e-11
+    const double GM_sun = 1; // Standard gravitational parameter : GM_sun = 1.32712440018(9) * 10^20 (m^3 * s^−2) =  1.32712440018e20
+    const double AU = 1; // ...
+    const double k = 1; // Gaussian gravitational constant : k = (G * M_sun)^0.5 * AU^−1.5 = 0.01720209895 rad/day
     const double kk = k * k;
     int stepNum = 10000;
 
@@ -94,6 +128,8 @@ int main(int argc, char* argv[])
     std::cout << "step_num: " << stepNum << std::endl;
 
     // Calculate
+    cm::create();
+    std::cout << "\e[?25l";
     for (int it = 0; it < stepNum; ++it) {
         for (int i = 0; i < objects.size(); ++i) {
             cm::Object& co = objects[i];
@@ -108,8 +144,17 @@ int main(int argc, char* argv[])
             co.v += co.a;
             co.r += co.v;
         };
-        visualize(objects);
+        if (it % 10 == 0) {
+            visualize(objects, 'o', it);
+        }
+        usleep(100);
+        if (it % 10 == 0) {
+            visualize(objects, '.', it);
+        }
     }
+    visualize(objects, 'o', stepNum);
+    cm::moveCursor(cm::SIZE_Y, 0);
+    std::cout << "\e[?25h";
 
     return 0;
 }
