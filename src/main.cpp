@@ -53,57 +53,69 @@ std::ostream& operator<<(std::ostream& os, const Object& obj)
     return os;
 }
 
-void moveCursor(int r, int c)
-{
-    static int rw = 0;
-    static int cl = 0;
-    if (r - rw) {
-        std::cout << "\033[" << std::abs(r - rw) << (r - rw > 0 ? "B" : "A");
-        rw = r;
+struct Visualizer {
+};
+
+struct Manager {
+    Manager(Visualizer* vizualizer = nullptr) : _vizualizer (vizualizer) {}
+private:
+    Visualizer* _vizualizer;
+};
+
+struct ConsoleVisualizer : public Visualizer {
+    void visualize(const std::vector<cm::Object>& objects, char ch, int it)
+    {
+        for (int i = 0; i < objects.size(); ++i) {
+            const cm::Object& o = objects[i];
+            const int x = int(o.r.x);
+            const int y = int(o.r.y);
+            if (x > (-SIZE_X / 2) && x < (SIZE_X / 2) && y > (-SIZE_Y / 2) && y < (SIZE_Y / 2)) {
+                putChar(y + SIZE_Y / 2, x + SIZE_X / 2, ch);
+            }
+        }
+        putStr(0, SIZE_X + 1, "it: " + std::to_string(it));
     }
-    if (c - cl) {
-        std::cout << "\033[" << std::abs(c - cl) << (c - cl > 0 ? "C" : "D");
-        cl = c;
-    }
-}
 
-void putChar(int r, int c, char ch)
-{
-    moveCursor(r, c);
-    std::cout << ch << "\033[D";
-}
-
-void putStr(int r, int c, std::string str)
-{
-    moveCursor(r, c);
-    std::cout << str;
-    for (int i = 0; i < str.size(); ++i) {
-        std::cout << "\033[D";
-    }
-}
-
-const int SIZE_X = 40;
-const int SIZE_Y = 30;
-
-int create()
-{
-    std::cout << std::string(SIZE_Y, '\n') << std::endl;
-    std::cout << "\033[" + std::to_string(SIZE_Y) + "F";
-    return 0;
-}
-
-void visualize(const std::vector<cm::Object>& objects, char ch, int it)
-{
-    for (int i = 0; i < objects.size(); ++i) {
-        const cm::Object& o = objects[i];
-        const int x = int(o.r.x);
-        const int y = int(o.r.y);
-        if (x > (-SIZE_X / 2) && x < (SIZE_X / 2) && y > (-SIZE_Y / 2) && y < (SIZE_Y / 2)) {
-            putChar(y + SIZE_Y / 2, x + SIZE_X / 2, ch);
+private:
+    void moveCursor(int r, int c)
+    {
+        static int rw = 0;
+        static int cl = 0;
+        if (r - rw) {
+            std::cout << "\033[" << std::abs(r - rw) << (r - rw > 0 ? "B" : "A");
+            rw = r;
+        }
+        if (c - cl) {
+            std::cout << "\033[" << std::abs(c - cl) << (c - cl > 0 ? "C" : "D");
+            cl = c;
         }
     }
-    putStr(0, SIZE_X + 1, "it: " + std::to_string(it));
-}
+
+    void putChar(int r, int c, char ch)
+    {
+        moveCursor(r, c);
+        std::cout << ch << "\033[D";
+    }
+
+    void putStr(int r, int c, std::string str)
+    {
+        moveCursor(r, c);
+        std::cout << str;
+        for (int i = 0; i < str.size(); ++i) {
+            std::cout << "\033[D";
+        }
+    }
+
+    const int SIZE_X = 40;
+    const int SIZE_Y = 30;
+
+    int create()
+    {
+        std::cout << std::string(SIZE_Y, '\n') << std::endl;
+        std::cout << "\033[" + std::to_string(SIZE_Y) + "F";
+        return 0;
+    }
+};
 
 } // namespace cm
 
@@ -131,6 +143,10 @@ int main(int argc, char* argv[])
     cm::create();
     std::cout << "\e[?25l";
     for (int it = 0; it < stepNum; ++it) {
+        if (it % 1 == 0) {
+            visualize(objects, 'o', it);
+        }
+        std::vector<cm::Object> prevobjects = objects;
         for (int i = 0; i < objects.size(); ++i) {
             cm::Object& co = objects[i];
             co.a = cm::Vec3();
@@ -144,13 +160,10 @@ int main(int argc, char* argv[])
             co.v += co.a;
             co.r += co.v;
         };
-        if (it % 10 == 0) {
-            visualize(objects, 'o', it);
+        if (it % 1 == 0) {
+            visualize(prevobjects, ' ', it);
         }
-        usleep(100);
-        if (it % 10 == 0) {
-            visualize(objects, '.', it);
-        }
+        usleep(200);
     }
     visualize(objects, 'o', stepNum);
     cm::moveCursor(cm::SIZE_Y, 0);
