@@ -2,4 +2,4 @@
 
 mkdir -p build
 
-g++ -o build/celmech src/*
+g++ -o build/celmech src/* -lncurses
