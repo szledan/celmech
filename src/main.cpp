@@ -145,8 +145,8 @@ struct Visualizer {
 struct ConsoleVisualizer : public Visualizer<ConsoleVisualizer> {
     ConsoleVisualizer& setViewport(unsigned int width, unsigned int height)
     {
-        _width = width;
-        _height = height;
+        _canvas.w = width;
+        _canvas.h = height;
         return *this;
     }
 
@@ -154,7 +154,7 @@ struct ConsoleVisualizer : public Visualizer<ConsoleVisualizer> {
     {
         createCanvas();
         char ch;
-        while (ch != 27) {
+        while (ch != 27 && ch != 'q') {
             ch = getch();
             const System& system = simulator.simulate();;
             visualize(system, 'o');
@@ -163,14 +163,6 @@ struct ConsoleVisualizer : public Visualizer<ConsoleVisualizer> {
         finalize();
     }
 
-    void finalize()
-    {
-        refresh();
-        endwin();
-//        putStr(0, _width + 1, "it: " + std::to_string(it));
-//        moveCursor(_height, 0);
-//        std::cout << "\e[?25h"; // Cursor ON
-    }
 
     void visualize(const System& system, const char ch)
     {
@@ -178,59 +170,40 @@ struct ConsoleVisualizer : public Visualizer<ConsoleVisualizer> {
             const Object& o = system.objects()[i];
             const int x = int(o.r.x);
             const int y = int(o.r.y);
-            if (x > (-_width / 2) && x < (_width / 2) && y > (-_height / 2) && y < (_height / 2)) {
-                putChar(y + _height / 2, x + _width / 2, ch);
+            if (x > (-_canvas.w / 2) && x < (_canvas.w / 2) && y > (-_canvas.h / 2) && y < (_canvas.h / 2)) {
+                mvaddch(y + _canvas.h / 2, x + _canvas.w / 2, ch);
             }
 
-            mvprintw(_height - i, 0, "%d: %10f %10f", i, o.r.x, o.r.y);
+            mvprintw(_canvas.h - i - 1, 0, "%d: %10f %10f", i, o.r.x, o.r.y);
         }
-        move(0, 0);
+
+        move(_screen.h - 1, 0);
     }
 
 private:
-    void moveCursor(int r, int c)
-    {
-        static int rw = 0;
-        static int cl = 0;
-        if (r - rw) {
-            std::cout << "\033[" << std::abs(r - rw) << (r - rw > 0 ? "B" : "A");
-            rw = r;
-        }
-        if (c - cl) {
-            std::cout << "\033[" << std::abs(c - cl) << (c - cl > 0 ? "C" : "D");
-            cl = c;
-        }
-    }
-
-    void putChar(int r, int c, char ch)
-    {
-        mvprintw(r, c, "%c", ch);
-//        moveCursor(r, c);
-//        std::cout << ch << "\033[D";
-    }
-
-    void putStr(int r, int c, std::string str)
-    {
-        moveCursor(r, c);
-        std::cout << str;
-        for (int i = 0; i < str.size(); ++i) {
-            std::cout << "\033[D";
-        }
-    }
-
     void createCanvas()
     {
         initscr();
         noecho();
         scrollok(stdscr, TRUE);
         nodelay(stdscr, TRUE);
-//        std::cout << "\e[?25l"; // Cursor OFF
-//        std::cout << std::string(_height, '\n') << std::endl;
-//        std::cout << "\033[" + std::to_string(_height) + "F";
+
+        getmaxyx(stdscr, _screen.h, _screen.w);
+        _canvas = _screen;
+        _canvas.h -= 1;
     }
 
-    int _width = 40;
-    int _height = 30;
+    void finalize()
+    {
+        refresh();
+        endwin();
+    }
+
+    struct Size {
+        int w = 0;
+        int h = 0;
+    } _canvas, _screen;
+
     System _prevSystem;
 };
 
