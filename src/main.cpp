@@ -10,35 +10,47 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <map>
 #include <ncurses.h>
 #include <string>
-#include <vector>
 #include <unistd.h>
+#include <vector>
 
 namespace cm {
 
-struct Vec3 {
-    Vec3(const double x_ = 0, const double y_ = 0, const double z_ = 0) : x(x_), y(y_), z(z_) {}
+struct Coord {
+    Coord(const double x_ = 0, const double y_ = 0, const double z_ = 0) : x(x_), y(y_), z(z_) {}
     double x, y, z;
 
     double length() const { return std::sqrt(x * x + y * y + z * z); }
-    Vec3& operator+=(const Vec3& rhs) { x += rhs.x; y += rhs.y; z += rhs.z; return *this; }
-    Vec3& operator-=(const Vec3& rhs) { x -= rhs.x; y -= rhs.y; z -= rhs.z; return *this; }
+
+    Coord& operator+=(const Coord& rhs) { x += rhs.x; y += rhs.y; z += rhs.z; return *this; }
+    Coord& operator-=(const Coord& rhs) { x -= rhs.x; y -= rhs.y; z -= rhs.z; return *this; }
+    Coord& operator*=(const double rhs) { x *= rhs; y *= rhs; z *= rhs; return *this; }
+    Coord& operator/=(const double rhs) { return this->operator*=(1.0 / rhs); }
 };
 
-Vec3 operator+(Vec3 lhs, const Vec3& rhs) { lhs += rhs; return lhs; }
-Vec3 operator-(Vec3 lhs, const Vec3& rhs) { lhs -= rhs; return lhs; }
-Vec3 operator*(const double c, const Vec3& rhs) { return Vec3(c * rhs.x, c * rhs.y, c * rhs.z); }
-std::ostream& operator<<(std::ostream& os, const Vec3& obj)
+Coord operator+(Coord lhs, const Coord& rhs) { lhs += rhs; return lhs; }
+Coord operator-(Coord lhs, const Coord& rhs) { lhs -= rhs; return lhs; }
+Coord operator*(Coord lhs, const double c) { lhs *= c; return lhs; }
+Coord operator*(const double c, Coord rhs) { return rhs * c; }
+Coord operator/(const double c, Coord rhs) { rhs /= c; return rhs; }
+Coord operator/(Coord lhs, const double c) { lhs /= c; return lhs; }
+
+std::ostream& operator<<(std::ostream& os, const Coord& obj)
 {
     os << obj.x << "," << obj.y << "," << obj.z;
     return os;
 }
 
+typedef double Shape;
+typedef double Mass;
+
 struct Object {
-    Object(const double m_, const Vec3& r_, const Vec3& v_) : m(m_ ? m_ : 1.0), r(r_), v(v_) {}
-    Vec3 r, v, a;
-    double m;
+    Object(const double m_ = 1.0, const Coord& r_ = 0.0, const Coord& v_ = 0.0) : m(m_ ? m_ : 1.0), r(r_), v(v_) {}
+    Coord r, v, a;
+    Shape R;
+    Mass m;
 };
 
 std::ostream& operator<<(std::ostream& os, const Object& obj)
@@ -50,24 +62,25 @@ std::ostream& operator<<(std::ostream& os, const Object& obj)
 }
 
 struct System {
-    typedef typename std::vector<Object> Objects;
+    typedef typename std::map<int, Object> Objects;
 
     System& addObject(Object obj)
     {
-        _objects.push_back(obj);
+        _objects[_uid++] = obj;
         return *this;
     }
 
-    System& addObject(const double m, const Vec3& r, const Vec3& v) { return addObject(Object(m, r, v)); }
+    System& addObject(const double m, const Coord& r, const Coord& v) { return addObject(Object(m, r, v)); }
 
     const size_t size() const { return _objects.size(); }
     const bool empty() const { return _objects.size() == 0; }
 
     const Objects& objects() const { return _objects; }
-    Objects& objects() { return _objects; }
+    Objects& objects() { return const_cast<Objects&>(const_cast<const System*>(this)->objects()); }
 
 private:
-    std::vector<Object> _objects;
+    Objects _objects;
+    int _uid = 0;
 
     // double U = 1/2 * SUM(i; SUM(j, i!=j; k^2 * m_i * m_j / r_ij));
     // Vec3 r = SUM(i; m_i * r_i) / SUM(i; r_i);
@@ -77,8 +90,8 @@ private:
 
 std::ostream& operator<<(std::ostream& os, const System& system)
 {
-    for (const auto& o : system.objects()) {
-        os << o << std::endl;
+    for (auto& o : system.objects()) {
+        os << o.second << std::endl;
     }
     return os;
 }
@@ -104,12 +117,48 @@ struct Simulator {
         return *this;
     }
 
+    void init()
+    {
+        _table.resize(_system.size() * (_system.size() - 1) / 2);
+        System::Objects& objects = _system.objects();
+        for (int i = 0, m = 0; i < objects.size(); ++i) {
+            const cm::Object& co = objects[i];
+            for (int j = i + 1; j < objects.size(); ++j, ++m) {
+                const cm::Object& o = objects[j];
+                _table[m].M = _universe.kk * co.m * o.m;
+                _table[m].a = 0.0;
+            }
+        }
+    }
+
     const System& simulate()
     {
         System::Objects& objects = _system.objects();
+
+        for (int i = 0, m = 0; i < objects.size() - 1; ++i) {
+            const cm::Object& co = objects[i];
+            _table[m].a = 0.0;
+            for (int j = i + 1; j < objects.size(); ++j, ++m) {
+                const cm::Object& o = objects[j];
+                const cm::Coord rr = o.r - co.r;
+                const double d = rr.length();
+                _table[m].a = _table[m].M / (d * d * d) * rr;
+            }
+        }
+
+        for (int i = 0, m = 0; i < objects.size(); ++i) {
+            const cm::Object& co = objects[i];
+            for (int j = i + 1; j < objects.size(); ++j, ++m) {
+                const cm::Object& o = objects[j];
+                const cm::Coord rr = o.r - co.r;
+                const double d = rr.length();
+                _table[m].a = _table[m].M / (d * d * d) * rr;
+            }
+        }
+
         for (int i = 0; i < objects.size(); ++i) {
             cm::Object& co = objects[i];
-            co.a = cm::Vec3();
+            co.a = cm::Coord();
             for (int j = 0; j < objects.size(); ++j) {
                 if (i != j) {
                     cm::Object& o = objects[j];
@@ -125,6 +174,13 @@ struct Simulator {
     }
 
 private:
+    struct Coef {
+        double M;
+        cm::Coord a;
+    };
+
+    std::vector<Coef> _table;
+
     System _system;
     Universe _universe;
 };
@@ -153,28 +209,28 @@ struct ConsoleVisualizer : public Visualizer<ConsoleVisualizer> {
     virtual void run(int argc, char* argv[])
     {
         createCanvas();
+        simulator.init();
         char ch;
         while (ch != 27 && ch != 'q') {
             ch = getch();
-            const System& system = simulator.simulate();;
+            const System& system = simulator.simulate();
             visualize(system, 'o');
             usleep(200);
         }
         finalize();
     }
 
-
     void visualize(const System& system, const char ch)
     {
         for (int i = 0; i < system.size(); ++i) {
-            const Object& o = system.objects()[i];
+            const cm::Object& o = system.objects().at(i);
             const int x = int(o.r.x);
             const int y = int(o.r.y);
             if (x > (-_canvas.w / 2) && x < (_canvas.w / 2) && y > (-_canvas.h / 2) && y < (_canvas.h / 2)) {
                 mvaddch(y + _canvas.h / 2, x + _canvas.w / 2, ch);
             }
 
-            mvprintw(_canvas.h - i - 1, 0, "%d: %10f %10f", i, o.r.x, o.r.y);
+            mvprintw(_canvas.h - system.size() + i, 0, "%d: %10f %10f", i, o.r.x, o.r.y);
         }
 
         move(_screen.h - 1, 0);
@@ -204,6 +260,7 @@ private:
         int h = 0;
     } _canvas, _screen;
 
+
     System _prevSystem;
 };
 
@@ -212,8 +269,10 @@ private:
 int main(int argc, char* argv[])
 {
     cm::System twoObj = cm::System()
-            .addObject(0.01, cm::Vec3(-10, 0, 0), cm::Vec3(0, 0.001, 0))
-            .addObject(0.01, cm::Vec3(10, 0, 0), cm::Vec3(0, -0.001, 0));
+            .addObject(0.01, cm::Coord(-10, 0, 0), cm::Coord(0, 0.001, 0))
+            .addObject(0.01, cm::Coord(10, 0, 0), cm::Coord(0, -0.001, 0))
+            .addObject(0.0001, cm::Coord(15, 0, 0), cm::Coord(0, 0.0005, 0))
+            .addObject(0.0001, cm::Coord(-15, 0, 0), cm::Coord(0, -0.0005, 0));
     cm::Simulator simulator = cm::Simulator()
             .setSystem(twoObj);
 
