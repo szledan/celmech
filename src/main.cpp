@@ -12,13 +12,25 @@
 #include <iostream>
 #include <map>
 #include <ncurses.h>
+#include <sstream>
 #include <string>
 #include <unistd.h>
 #include <vector>
 
 namespace cm {
 
+#define STR_HELPER(X) #X
+#define STR(X) STR_HELPER(X)
+#define WIDTH_OF_VALUE 10
+#define PREC_OF_VALUE .3
+#define PATTERN(X) "%" STR(WIDTH_OF_VALUE) X
+
+#define FLOAT_PATTERN PATTERN("f")
+#define STR_PATTERN PATTERN("s")
+
 struct Coord {
+#define COORD_PATTERN(X) PATTERN(X) " " PATTERN(X) " " PATTERN(X) " "
+#define COORD_VALUE_PATTERN COORD_PATTERN("f")
     Coord(const double x_ = 0, const double y_ = 0, const double z_ = 0) : x(x_), y(y_), z(z_) {}
     double x, y, z;
 
@@ -44,9 +56,15 @@ std::ostream& operator<<(std::ostream& os, const Coord& obj)
 }
 
 typedef double Shape;
+#define SHAPE_PATTERN(X) PATTERN(X)
 typedef double Mass;
+#define MASS_PATTERN(X) PATTERN(X)
 
 struct Object {
+#define OBJ_P_PATTERN(X) COORD_PATTERN(X)
+#define OBJ_PV_PATTERN(X) OBJ_P_PATTERN(X) " " COORD_PATTERN(X)
+#define OBJ_PVA_PATTERN(X) OBJ_PV_PATTERN(X) " " COORD_PATTERN(X)
+#define OBJ_FULL_PATTERN(X) OBJ_PVA_PATTERN(X) " " SHAPE_PATTERN(X) " " MASS_PATTERN(X)
     Object(const double m_ = 1.0, const Coord& r_ = 0.0, const Coord& v_ = 0.0) : m(m_ ? m_ : 1.0), r(r_), v(v_) {}
     Coord r, v, a;
     Shape R;
@@ -187,7 +205,7 @@ private:
 
 template<typename T>
 struct Visualizer {
-    T& setSimulator(Simulator& simulator_)
+    virtual T& setSimulator(Simulator& simulator_)
     {
         simulator = simulator_;
         return static_cast<T&>(*this);
@@ -208,41 +226,69 @@ struct ConsoleVisualizer : public Visualizer<ConsoleVisualizer> {
 
     virtual void run(int argc, char* argv[])
     {
-        createCanvas();
+        MEVENT event;
+
+        createWindow();
+
         simulator.init();
-        char ch;
+
+int me = 0;
+        int ch;
         while (ch != 27 && ch != 'q') {
-            ch = getch();
+            ch = wgetch(stdscr);
+            switch(ch) {
+            case KEY_MOUSE:
+                if(getmouse(&event) == OK) {
+me++;
+                    if(event.bstate & BUTTON1_PRESSED) {
+mvprintw(me, 1, "BUTTON1_PRESSED");
+                    }
+                    if(event.bstate & BUTTON1_RELEASED) {
+mvprintw(me, 20, "BUTTON1_RELEASED");
+                    }
+                    if(event.bstate & BUTTON1_CLICKED) {
+mvprintw(me, 40, "BUTTON1_CLICKED");
+                    }
+                }
+                break;
+            }
+
             const System& system = simulator.simulate();
             visualize(system, 'o');
             usleep(200);
+
+            {
+                int h, w;
+                getmaxyx(stdscr, h, w);
+                if (w != _screen.w || h != _screen.h) {
+                    clear();
+                    _screen.w = w;
+                    _screen.h = h;
+                    _canvas = _screen;
+                    _canvas.h -= 1;
+                }
+            }
         }
         finalize();
     }
 
-    void visualize(const System& system, const char ch)
-    {
-        for (int i = 0; i < system.size(); ++i) {
-            const cm::Object& o = system.objects().at(i);
-            const int x = int(o.r.x);
-            const int y = int(o.r.y);
-            if (x > (-_canvas.w / 2) && x < (_canvas.w / 2) && y > (-_canvas.h / 2) && y < (_canvas.h / 2)) {
-                mvaddch(y + _canvas.h / 2, x + _canvas.w / 2, ch);
-            }
-
-            mvprintw(_canvas.h - system.size() + i, 0, "%d: %10f %10f", i, o.r.x, o.r.y);
-        }
-
-        move(_screen.h - 1, 0);
-    }
-
 private:
-    void createCanvas()
+    void createWindow()
     {
         initscr();
+        start_color();
+
+        init_pair(1, COLOR_BLACK, COLOR_RED);
+        init_pair(2, COLOR_BLACK, COLOR_GREEN);
+
         noecho();
         scrollok(stdscr, TRUE);
         nodelay(stdscr, TRUE);
+
+        curs_set(0); /* Invisible cursor */
+        //halfdelay(1); /* Don't wait for more than 1/10 seconds for a keypress */
+        keypad(stdscr, TRUE); /* Enable keypad mode */
+        mousemask(ALL_MOUSE_EVENTS, NULL); /* Report all mouse events */
 
         getmaxyx(stdscr, _screen.h, _screen.w);
         _canvas = _screen;
@@ -251,8 +297,38 @@ private:
 
     void finalize()
     {
+        //printf("\033[?1003l\n");
         refresh();
         endwin();
+    }
+
+    void systemTable(const System& system)
+    {
+        mvprintw(_canvas.h - system.size() - 1, 0, "%3s" OBJ_PVA_PATTERN("s"), "i", "o.r.x", "o.r.y", "o.r.z", "o.v.x", "o.v.y", "o.v.z", "o.a.x", "o.a.y", "o.a.z");
+
+        for (int i = 0; i < system.size(); ++i) {
+            const cm::Object& o = system.objects().at(i);
+            mvprintw(_canvas.h - system.size() + i, 0, "%3d" OBJ_PVA_PATTERN("f"), i, o.r.x, o.r.y, o.r.z, o.v.x, o.v.y, o.v.z, o.a.x, o.a.y, o.a.z);
+        }
+    }
+
+    void visualize(const System& system, const char ch)
+    {
+        //mvprintw(_canvas.h - system.size(), 0, "%d: %10f %10f %10f", i, o.r.x, o.r.y, o.r.z);
+        attron(COLOR_PAIR(1));
+        for (int i = 0; i < system.size(); ++i) {
+            const cm::Object& o = system.objects().at(i);
+            const int x = int(o.r.x);
+            const int y = int(o.r.y);
+            if (x > (-_canvas.w / 2) && x < (_canvas.w / 2) && y > (-_canvas.h / 2) && y < (_canvas.h / 2)) {
+                mvaddch(y + _canvas.h / 2, x + _canvas.w / 2, ch);
+            }
+
+        }
+        attroff(COLOR_PAIR(1));
+        systemTable(system);
+
+        move(_screen.h - 1, 0);
     }
 
     struct Size {
