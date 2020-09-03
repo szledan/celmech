@@ -13,36 +13,33 @@
     </style>
 
     <div class="canvas_wrapper">
-      <canvas id="space_canvas" class="canvas-layer" width="1000px" height="1000px"></canvas>
       <canvas id="working_canvas" class="canvas-layer" width="1000px" height="1000px"></canvas>
+      <canvas id="space_canvas" class="canvas-layer" width="1000px" height="1000px"></canvas>
     </div>
 
     <script id="vertex-shader-2d" type="notjs">
+      attribute vec4 a_position;
+      attribute vec4 a_color;
 
-      // an attribute will receive data from a buffer
-      attribute vec2 a_position;
+      varying vec4 v_color;
 
-      // all shaders have a main function
-      void main() {
-
-        // gl_Position is a special variable a vertex shader
-        // is responsible for setting
-        gl_Position = vec4(a_position, 0.0, 1.0);
-        gl_PointSize = 10.0;
+      void main()
+      {
+        gl_Position = vec4(a_position.xy, 0.0, 1.0);
+        gl_PointSize = a_position.w;
+        v_color = a_color;
       }
 
     </script>
 
     <script id="fragment-shader-2d" type="notjs">
+      precision highp float;
 
-      // fragment shaders don't have a default precision so we need
-      // to pick one. mediump is a good default
-      precision mediump float;
+      varying vec4 v_color;
 
-      void main() {
-        // gl_FragColor is a special variable a fragment shader
-        // is responsible for setting
-        gl_FragColor = vec4(1, 0, 0.5, 1); // return reddish-purple
+      void main()
+      {
+        gl_FragColor = v_color;
       }
 
     </script>
@@ -77,10 +74,11 @@
         function main() {
             var working_canvas = document.querySelector("#working_canvas");
             var ctx = working_canvas.getContext("2d");
-            var space_canvas = document.querySelector("#space_canvas");
-            var gl = space_canvas.getContext("webgl");
+            ctx.fillRect(10, 10, working_canvas.width - 20, working_canvas.height - 20);
 
-            ctx.fillRect(130, 20, 10, 10);
+            var space_canvas = document.querySelector("#space_canvas");
+            var gl = space_canvas.getContext("webgl", {preserveDrawingBuffer: true});
+
 
 
             var vertexShaderSource = document.querySelector("#vertex-shader-2d").text;
@@ -91,43 +89,93 @@
 
             var program = createProgram(gl, vertexShader, fragmentShader);
 
-            var positionAttributeLocation = gl.getAttribLocation(program, "a_position");
-            var positionBuffer = gl.createBuffer();
-
             gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
             // Clear the canvas
             gl.clearColor(0, 0, 0, 0);
             gl.clear(gl.COLOR_BUFFER_BIT);
             // Tell it to use our program (pair of shaders)
+
             gl.useProgram(program);
 
-            for (var i = 100; i < 1000; ++i) {
-                // three 2d points
-                var positions = [
-                  0 + (i / gl.canvas.width) - 1, 0.0,
-                  0, 0.5,
-                  0.7, 0,
-                ];
+            var objectsBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, objectsBuffer);
 
-                gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+            var objects = [
+            // Px, Py, Pz, R        Vx, Vy, Vr, M        RGBA
+              0.9, 0.0, 0.0,  3.0,  0.0, 0.00016, 0.0, 0.0000001,  0.5, 0.0, 0.0, 1.0,
+              -0.2, 0.0, 0.0, 6.0,  0.0, -0.00008, 0.0, 0.0000002,  0.0, 0.5, 0.0, 1.0,
+            ];
+            oa = new Float32Array(objects);
 
-                gl.enableVertexAttribArray(positionAttributeLocation);
-                // Bind the position buffer.
-                gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            var positionAttributeLocation = gl.getAttribLocation(program, "a_position");
+            gl.enableVertexAttribArray(positionAttributeLocation);
+            var colorAttributeLocation = gl.getAttribLocation(program, "a_color");
+            gl.enableVertexAttribArray(colorAttributeLocation);
 
-                // Tell the attribute how to get data out of positionBuffer (ARRAY_BUFFER)
-                var size = 2;          // 2 components per iteration
+
+            // Tell the attribute how to get data out of positionBuffer (ARRAY_BUFFER)
+            {
+                var size = 4;          // 2 components per iteration
                 var type = gl.FLOAT;   // the data is 32bit floats
                 var normalize = false; // don't normalize the data
-                var stride = 0;        // 0 = move forward size * sizeof(type) each iteration to get the next position
-                var offset = 0;        // start at the beginning of the buffer
+                var stride = 12 * 4;        // 0 = move forward size * sizeof(type) each iteration to get the next position
+                var offset = 0;
                 gl.vertexAttribPointer(positionAttributeLocation, size, type, normalize, stride, offset);
+            }
+            {
+                var size = 4;          // 2 components per iteration
+                var type = gl.FLOAT;   // the data is 32bit floats
+                var normalize = false; // don't normalize the data
+                var stride = 12 * 4;        // 0 = move forward size * sizeof(type) each iteration to get the next position
+                var offset = 8 * 4;
+                gl.vertexAttribPointer(colorAttributeLocation, size, type, normalize, stride, offset);
+            }
+
+            var x = 0;
+
+            function rendr() {
+                var x21 = oa[12] - oa[0];
+                var y21 = oa[13] - oa[1];
+                var z21 = oa[14] - oa[2];
+                var d = Math.sqrt(x21 * x21 + y21 * y21 + z21 * z21);
+                var ddd = d * d * d;
+                var m1m2 = oa[19] * oa[7];
+                var m1a1x = m1m2 * x21 / ddd;
+                var m1a1y = m1m2 * y21 / ddd;
+                var m1a1z = m1m2 * z21 / ddd;
+                oa[4] += m1a1x / oa[7];
+                oa[5] += m1a1y / oa[7];
+                oa[6] += m1a1z / oa[7];
+                oa[16] += -m1a1x / oa[19];
+                oa[17] += -m1a1y / oa[19];
+                oa[18] += -m1a1z / oa[19];
+                oa[0] += oa[4];
+                oa[1] += oa[5];
+                oa[2] += oa[6];
+                oa[12] += oa[16];
+                oa[13] += oa[17];
+                oa[14] += oa[18];
+
+                //paramArray[0] = (x / gl.canvas.width)
+                // three 2d points
+                gl.bindBuffer(gl.ARRAY_BUFFER, objectsBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, oa, gl.STATIC_DRAW);
+                gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
                 var primitiveType = gl.POINTS;
                 var offset = 0;
-                var count = 3;
+                var count = 2;
+
                 gl.drawArrays(primitiveType, offset, count);
             }
+
+            rendr();
+            rendr();
+            rendr();
+            rendr();
+            rendr();
+
+            setInterval(rendr, 0);
         }
 
         main();
